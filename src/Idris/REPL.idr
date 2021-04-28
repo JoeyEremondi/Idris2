@@ -369,6 +369,81 @@ findInTree p hint m = map snd $ head' $ filter match $ sortBy (\x, y => cmp (mea
     match : (NonEmptyFC, Name) -> Bool
     match (_, n) = matches hint n && userNameRoot n == userNameRoot hint
 
+
+getItDecls :
+  {auto o : Ref ROpts REPLOpts} ->
+  Core (List ImpDecl)
+getItDecls
+  = do opts <- get ROpts
+       case evalResultName opts of
+         Nothing => pure []
+         Just n => pure [ IClaim replFC top Private [] (MkImpTy replFC EmptyFC (UN "it") (Implicit replFC False)), IDef replFC (UN "it") [PatClause replFC (IVar replFC (UN "it")) (IVar replFC n)]]
+
+
+
+||| Given a REPLEval mode for evaluation,
+||| produce the normalization function that normalizes terms
+||| using that evaluation mode
+replEval : {auto c : Ref Ctxt Defs} ->
+  {vs : _} ->
+  REPLEval -> Defs -> Env Term vs -> Term vs -> Core (Term vs)
+replEval NormaliseAll = normaliseAll
+replEval _ = normalise
+
+record TermWithType where
+  constructor WithType
+  termOf : Term []
+  typeOf : Term []
+
+||| Produce the elaboration of a PTerm, along with its inferred type
+inferAndElab : {auto c : Ref Ctxt Defs} ->
+  {auto u : Ref UST UState} ->
+  {auto s : Ref Syn SyntaxInfo} ->
+  {auto m : Ref MD Metadata} ->
+  {auto o : Ref ROpts REPLOpts} ->
+  ElabMode ->
+  PTerm ->
+  Core TermWithType
+inferAndElab emode itm
+  = do ttimp <- desugar AnyExpr [] itm
+       let ttimpWithIt = ILocal replFC !getItDecls ttimp
+       inidx <- resolveName (UN "[input]")
+       -- a TMP HACK to prioritise list syntax for List: hide
+       -- foreign argument lists. TODO: once the new FFI is fully
+       -- up and running we won't need this. Also, if we add
+       -- 'with' disambiguation we can use that instead.
+       catch (do hide replFC (NS primIONS (UN "::"))
+                 hide replFC (NS primIONS (UN "Nil")))
+             (\err => pure ())
+       (tm , gty) <- elabTerm inidx emode [] (MkNested [])
+                   [] ttimpWithIt Nothing
+       ty <- getTerm gty
+       pure (tm `WithType` ty)
+
+||| Produce the normal form of a PTerm, along with its inferred type
+inferAndNormalize : {auto c : Ref Ctxt Defs} ->
+  {auto u : Ref UST UState} ->
+  {auto s : Ref Syn SyntaxInfo} ->
+  {auto m : Ref MD Metadata} ->
+  {auto o : Ref ROpts REPLOpts} ->
+  REPLEval ->
+  PTerm ->
+  Core TermWithType
+inferAndNormalize emode itm
+  = do (tm `WithType` ty) <- inferAndElab (elabMode emode) itm
+       logTerm "repl.eval" 10 "Elaborated input" tm
+       defs <- get Ctxt
+       let norm = replEval emode
+       ntm <- norm defs [] tm
+       logTermNF "repl.eval" 5 "Normalised" [] ntm
+       pure $ ntm `WithType` ty
+  where
+    elabMode : REPLEval -> ElabMode
+    elabMode EvalTC = InType
+    elabMode _ = InExpr
+
+
+
 processEdit : {auto c : Ref Ctxt Defs} ->
               {auto u : Ref UST UState} ->
               {auto s : Ref Syn SyntaxInfo} ->
@@ -539,16 +614,6 @@ processEdit (MakeWith upd line name)
          if upd
             then updateFile (addMadeCase markM w (max 0 (integerToNat (cast (line - 1)))))
             else pure $ MadeWith markM w
-
-getItDecls :
-    {auto o : Ref ROpts REPLOpts} ->
-    Core (List ImpDecl)
-getItDecls
-    = do opts <- get ROpts
-         case evalResultName opts of
-            Nothing => pure []
-            Just n => pure [ IClaim replFC top Private [] (MkImpTy replFC EmptyFC (UN "it") (Implicit replFC False)), IDef replFC (UN "it") [PatClause replFC (IVar replFC (UN "it")) (IVar replFC n)]]
-
 prepareExp :
     {auto c : Ref Ctxt Defs} ->
     {auto u : Ref UST UState} ->
@@ -643,67 +708,6 @@ loadMainFile f
          case errs of
            [] => pure (FileLoaded f)
            _ => pure (ErrorsBuildingFile f errs)
-
-||| Given a REPLEval mode for evaluation,
-||| produce the normalization function that normalizes terms
-||| using that evaluation mode
-replEval : {auto c : Ref Ctxt Defs} ->
-  {vs : _} ->
-  REPLEval -> Defs -> Env Term vs -> Term vs -> Core (Term vs)
-replEval NormaliseAll = normaliseAll
-replEval _ = normalise
-
-record TermWithType where
-  constructor WithType
-  termOf : Term []
-  typeOf : Term []
-
-||| Produce the elaboration of a PTerm, along with its inferred type
-inferAndElab : {auto c : Ref Ctxt Defs} ->
-  {auto u : Ref UST UState} ->
-  {auto s : Ref Syn SyntaxInfo} ->
-  {auto m : Ref MD Metadata} ->
-  {auto o : Ref ROpts REPLOpts} ->
-  ElabMode ->
-  PTerm ->
-  Core TermWithType
-inferAndElab emode itm
-  = do ttimp <- desugar AnyExpr [] itm
-       let ttimpWithIt = ILocal replFC !getItDecls ttimp
-       inidx <- resolveName (UN "[input]")
-       -- a TMP HACK to prioritise list syntax for List: hide
-       -- foreign argument lists. TODO: once the new FFI is fully
-       -- up and running we won't need this. Also, if we add
-       -- 'with' disambiguation we can use that instead.
-       catch (do hide replFC (NS primIONS (UN "::"))
-                 hide replFC (NS primIONS (UN "Nil")))
-             (\err => pure ())
-       (tm , gty) <- elabTerm inidx emode [] (MkNested [])
-                   [] ttimpWithIt Nothing
-       ty <- getTerm gty
-       pure (tm `WithType` ty)
-
-||| Produce the normal form of a PTerm, along with its inferred type
-inferAndNormalize : {auto c : Ref Ctxt Defs} ->
-  {auto u : Ref UST UState} ->
-  {auto s : Ref Syn SyntaxInfo} ->
-  {auto m : Ref MD Metadata} ->
-  {auto o : Ref ROpts REPLOpts} ->
-  REPLEval ->
-  PTerm ->
-  Core TermWithType
-inferAndNormalize emode itm
-  = do (tm `WithType` ty) <- inferAndElab (elabMode emode) itm
-       logTerm "repl.eval" 10 "Elaborated input" tm
-       defs <- get Ctxt
-       let norm = replEval emode
-       ntm <- norm defs [] tm
-       logTermNF "repl.eval" 5 "Normalised" [] ntm
-       pure $ ntm `WithType` ty
-  where
-    elabMode : REPLEval -> ElabMode
-    elabMode EvalTC = InType
-    elabMode _ = InExpr
 
 
 ||| Process a single `REPLCmd`
