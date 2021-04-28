@@ -6,6 +6,8 @@ import public Core.Name
 import Libraries.Data.Bool.Extra
 import Data.List
 import Data.Nat
+import Data.Nat.Order
+import Data.DPair
 import Libraries.Data.NameMap
 import Data.Vect
 import Decidable.Equality
@@ -1531,3 +1533,84 @@ export
 {vars : _} -> Pretty (Term vars) where
   pretty = pretty . show
   -- TODO: prettier output
+
+
+-- Utilities for checking if one type is the return type
+-- of a function type, for some number of arguments
+
+
+||| A view for the number of arguments a term
+||| of a given type can (always) be applied to.
+public export
+data PiArgsView : Term vars -> Nat -> Type where
+  NotPi : PiArgsView t 0
+  IsPi : PiArgsView cod n -> PiArgsView (Bind fc nm (Pi fc' count info dom ) cod) (S n)
+
+||| Generate a PiArgsView for any term
+public export
+piArgsView : (t : Term vars) -> (Subset Nat (PiArgsView t))
+piArgsView (Bind _ _ (Pi _ _ _ dom ) cod) =
+  let rec = piArgsView cod
+  in (Element _ $ IsPi (snd rec))
+piArgsView _ = (Element _ NotPi)
+
+-- -- TODO: remove when added to stdlib
+-- export
+-- minusLteMonotone : {p : Nat} -> m `LTE` n -> minus m p `LTE` minus n p
+-- minusLteMonotone LTEZero = LTEZero
+-- minusLteMonotone {p = Z} prf@(LTESucc _) = prf
+-- minusLteMonotone {p = S p} (LTESucc lte) = minusLteMonotone lte
+
+-- -- TODO: add to stdlib, remove when we can bootstrap from version with it
+-- export
+-- minusLteZero : {m : Nat} -> {n : Nat} -> m `LTE` n -> minus m n = Z
+-- minusLteZero lte =
+--   LTEIsAntisymmetric _ _
+--     (rewrite (minusZeroN n) in (minusLteMonotone {p = n} lte)) LTEZero
+
+||| View that aligns two types, where the first type may have more
+||| arrows than the second.
+||| If we have PiAlignView t1 t2 n t3, then a function of type t1
+||| can be given n arguments
+||| to produce a value of type t2, provided that t3 and t2 can be unified.
+data PiAlignView : (t1 : Term vars1) -> (t2 : Term vars2) -> Nat -> (Exists Term) -> Type where
+    PiAlignBase :
+      {n1 : Nat} -> {n2 : Nat} ->
+      (0 funView : PiArgsView t1 n1) -> (0 goalView : PiArgsView t2 n2) ->
+      (0 lte : n1 `LTE` n2) ->
+      PiAlignView t1 t2 0 (Evidence _ t1)
+    PiAlignArg : {dom : Term vars} ->
+      PiAlignView cod goalView n pr ->
+      PiAlignView (Bind fc nm (Pi fc' count info dom ) cod) goalView (S n) pr
+    -- PiAlignView (IsPi {info = info} {dom = dom} funView) goalView (S n) pr
+
+||| Given two types, with views for how many arguments they take,
+||| find the domain of the first type that must equal the second type
+||| for it to be the result of applying a function of the first.
+piAlignView : {n1 : Nat} -> {n2 : Nat} ->
+  {t1 : Term vars1} -> {t2 : Term vars2} ->
+  (0 funView : PiArgsView t1 n1) ->
+  (0 goalView : PiArgsView t2 n2) ->
+  (Subset (Nat, Exists Term) (\ (n , pr) => PiAlignView t1 t2 n pr))
+piAlignView {n1 = Z} {n2 = n2} fv gv =
+  Element (Z, _) (PiAlignBase fv gv LTEZero)
+piAlignView {   n1 = (S k)} {n2 = n2} (IsPi fv) gv =
+  let (Element (_ , _) rec) = piAlignView fv gv
+  in (Element (_, _) (PiAlignArg rec))
+
+||| Given types t1 and t2, find the number of arguments
+||| that must be given,
+||| along with a type t3 that must be unifiable with t2,
+||| in order for a function of type t1 to produce a value of type t2.
+||| We make no guarantees that t2 and t3 are actually the same/unifiable.
+public export
+alignPiTypes :
+  (t1 : Term vars1) ->
+  (t2 : Term vars2) ->
+  (Subset (Nat, Exists Term) (\ (n , pr) => PiAlignView t1 t2 n pr))
+alignPiTypes t1 t2 =
+  let
+    (Element _ funView) = piArgsView t1
+    (Element _ goalView) = piArgsView t2
+    (Element (n , t) ret) = piAlignView funView goalView
+  in (Element (n , t) ret)
