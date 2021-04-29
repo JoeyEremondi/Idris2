@@ -1554,19 +1554,6 @@ piArgsView (Bind _ _ (Pi _ _ _ dom ) cod) =
   in (Element _ $ IsPi (snd rec))
 piArgsView _ = (Element _ NotPi)
 
--- -- TODO: remove when added to stdlib
--- export
--- minusLteMonotone : {p : Nat} -> m `LTE` n -> minus m p `LTE` minus n p
--- minusLteMonotone LTEZero = LTEZero
--- minusLteMonotone {p = Z} prf@(LTESucc _) = prf
--- minusLteMonotone {p = S p} (LTESucc lte) = minusLteMonotone lte
-
--- -- TODO: add to stdlib, remove when we can bootstrap from version with it
--- export
--- minusLteZero : {m : Nat} -> {n : Nat} -> m `LTE` n -> minus m n = Z
--- minusLteZero lte =
---   LTEIsAntisymmetric _ _
---     (rewrite (minusZeroN n) in (minusLteMonotone {p = n} lte)) LTEZero
 
 ||| View that aligns two types, where the first type may have more
 ||| arrows than the second.

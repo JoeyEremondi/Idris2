@@ -440,6 +440,7 @@ data EditCmd : Type where
      MakeLemma : Bool -> Int -> Name -> EditCmd
      MakeCase : Bool -> Int -> Name -> EditCmd
      MakeWith : Bool -> Int -> Name -> EditCmd
+     Refine : Bool -> Int -> Name -> PTerm -> EditCmd
 
 public export
 data REPLCmd : Type where

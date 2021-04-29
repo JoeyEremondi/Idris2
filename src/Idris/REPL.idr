@@ -614,6 +614,22 @@ processEdit (MakeWith upd line name)
          if upd
             then updateFile (addMadeCase markM w (max 0 (integerToNat (cast (line - 1)))))
             else pure $ MadeWith markM w
+
+processEdit (Refine upd line name applied)
+  = do defs <- get Ctxt
+       syn <- get Syn
+       let brack = elemBy (\x, y => dropNS x == dropNS y) name (bracketholes syn)
+       case !(lookupDefTyName name (gamma defs)) of
+         [(n, nidx, Hole locs _, holeType)] =>
+         -- Compare the number of arguments the given function takes, versus
+         -- the number of arguments in the goal
+           do (funElab `WithType` funType) <- inferAndElab InExpr applied
+              let (Element (numNewHoles, funResult) _) = alignPiTypes funType holeType
+              let x = ?xx
+              pure ?ret
+         _ => pure $ EditError "Can only refine hole"
+
+
 prepareExp :
     {auto c : Ref Ctxt Defs} ->
     {auto u : Ref UST UState} ->
